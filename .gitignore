@@ -1,0 +1,8 @@
+.idea/
+*.iml
+*.xml
+venv/
+.venv/
+clientes.json
+__pycache__/
+.env
