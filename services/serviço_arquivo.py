@@ -28,26 +28,36 @@ class ServicoArquivo:
         em_comentario_bloco = False
 
         for linha in linhas:
-            linha_trabalho = linha.strip()
+            linha_strip = linha.strip()
 
-            if '/*' in linha_trabalho:
+            if '/*' in linha_strip:
                 em_comentario_bloco = True
 
             if em_comentario_bloco:
-                if '*/' in linha_trabalho:
+                if bloco_atual:
+                    bloco_atual.append(linha)
+                if '*/' in linha_strip:
                     em_comentario_bloco = False
                 continue
 
-            if '--' in linha_trabalho:
-                linha_trabalho = linha_trabalho[:linha_trabalho.index('--')].strip()
+            if '--' in linha_strip:
+                if bloco_atual:
+                    bloco_atual.append(linha)
+                    continue
+                else:
+                    idx_comentario = linha.index('--')
+                    linha = linha[:idx_comentario].rstrip()
+                    linha_strip = linha.strip()
 
-            if linha_trabalho == '/':
+            if linha_strip == '/':
                 bloco = '\n'.join(bloco_atual).strip()
                 if bloco:
                     blocos.extend(self._dividir_bloco_se_necessario(bloco))
                 bloco_atual = []
-            elif linha_trabalho:
-                bloco_atual.append(linha_trabalho)
+            elif linha_strip:
+                bloco_atual.append(linha)
+            elif bloco_atual:
+                bloco_atual.append(' ')
 
         bloco_final = '\n'.join(bloco_atual).strip()
         if bloco_final:

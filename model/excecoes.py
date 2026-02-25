@@ -16,6 +16,18 @@ class ExecucaoError(SqlExecutorError):
         super().__init__(mensagem)
         self.codigo_ora = codigo_ora
 
+    @property
+    def is_ignorable(self) -> bool:
+        codigos_informativos = {
+            'ORA-00955',  # Nome já usado por um objeto existente
+            'ORA-01430',  # Coluna sendo adicionada já existe na tabela
+            'ORA-02260',  # Tabela só pode ter uma chave primária
+            'ORA-02261',  # Unique/Primary key já existe na tabela
+            'ORA-02275',  # Referential constraint já existe
+            'ORA-02303',  # Não pode remover/substituir tipo com dependentes
+        }
+        return self.codigo_ora in codigos_informativos
+
     @classmethod
     def from_oracle_error(cls, erro: str) -> 'ExecucaoError':
         """Fabrica a exceção correta baseado no código ORA."""

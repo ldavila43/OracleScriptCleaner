@@ -1,11 +1,10 @@
+import re
 import oracledb
 import os
 from dotenv import load_dotenv
 from typing import Optional, List
 from model.excecoes import ConexaoError, ConfiguracaoError, ExecucaoError
-
 from model.data_classes import ResultadoExecucao
-
 
 class Banco:
     _env_carregado = False
@@ -20,7 +19,6 @@ class Banco:
             try:
                 oracledb.init_oracle_client()
                 Banco._thick_mode_ativado = True
-
             except Exception as e:
                 raise RuntimeError(f"Falha ao carregar Oracle Instant Client: {e}")
 
@@ -49,14 +47,12 @@ class Banco:
                 )
 
             dsn_montado = f"{db_host}:{db_port}/{db_service}"
-
             self.__conexao = oracledb.connect(
                 user=db_user,
                 password=db_pass,
                 dsn=dsn_montado
             )
             self.__cursor = self.__conexao.cursor()
-
             return self
 
         except oracledb.Error as erro:
@@ -66,28 +62,72 @@ class Banco:
                 f"Erro inesperado ao configurar conexão para {self.__cliente}: {erro}"
             ) from erro
 
+    def _extrair_nome_objeto(self, sql: str) -> Optional[tuple[str, str]]:
+        match = re.search(
+            r'CREATE\s+(?:OR\s+REPLACE\s+)?(PROCEDURE|FUNCTION|PACKAGE\s+BODY|PACKAGE|TRIGGER|TYPE)\s+(\w+)',
+            sql,
+            re.IGNORECASE
+        )
+        if match:
+            tipo = re.sub(r'\s+', ' ', match.group(1)).strip().upper()
+            nome = match.group(2).strip().upper()
+            return nome, tipo
+        return None
+
+    def _verificar_erros_compilacao(self, nome_objeto: str) -> List[str]:
+        try:
+            self.__cursor.execute(
+                """
+                SELECT line, position, text
+                FROM user_errors
+                WHERE name = :nome
+                ORDER BY sequence
+                """,
+                nome=nome_objeto
+            )
+            rows = self.__cursor.fetchall()
+            return [f"Linha {row[0]}, Col {row[1]}: {row[2].strip()}" for row in rows]
+        except Exception:
+            return []
+
     def executar_script(self, sql: str) -> ResultadoExecucao:
         if not self.__conexao or not self.__cursor:
-            return ResultadoExecucao(
-                False,
-                "Conexão não estabelecida. Use o context manager (with)."
-            )
+            return ResultadoExecucao(False, "Conexão não estabelecida. Use o context manager (with).")
 
         try:
             sql_limpo = sql.strip()
             if not sql_limpo:
                 return ResultadoExecucao(False, "SQL vazio")
 
+            resultado_objeto = self._extrair_nome_objeto(sql_limpo)
+
             self.__cursor.execute(sql_limpo)
             linhas_afetadas = self.__cursor.rowcount
-
             self.__conexao.commit()
 
-            return ResultadoExecucao(
-                True,
-                "Script executado com sucesso",
-                linhas_afetadas
-            )
+            if resultado_objeto:
+                nome_objeto, tipo_objeto = resultado_objeto
+                tipos_com_body = {'PACKAGE BODY', 'PROCEDURE', 'FUNCTION', 'TRIGGER', 'TYPE'}
+                if tipo_objeto in tipos_com_body:
+                    self.__cursor.execute(
+                        """
+                        SELECT status FROM user_objects
+                        WHERE object_name = :nome
+                        AND status = 'INVALID'
+                        """,
+                        nome=nome_objeto
+                    )
+                    row = self.__cursor.fetchone()
+                    if row:
+                        erros_compilacao = self._verificar_erros_compilacao(nome_objeto)
+                        if erros_compilacao:
+                            detalhes = '\n'.join(erros_compilacao)
+                            return ResultadoExecucao(
+                                False,
+                                f"Objeto '{nome_objeto}' compilado com erros:\n{detalhes}"
+                            )
+
+            return ResultadoExecucao(True, "Script executado com sucesso", linhas_afetadas)
 
         except oracledb.Error as erro:
             if self.__conexao:
@@ -97,11 +137,7 @@ class Banco:
         except Exception as erro:
             if self.__conexao:
                 self.__conexao.rollback()
-
-            return ResultadoExecucao(
-                False,
-                f"Erro inesperado: {erro}"
-            )
+            return ResultadoExecucao(False, f"Erro inesperado: {erro}")
 
     def executar_scripts_batch(self, scripts: List[str]):
         resultados = []
@@ -112,7 +148,8 @@ class Banco:
                 resultados.append(resultado)
             except ExecucaoError as e:
                 resultados.append(ResultadoExecucao(False, str(e)))
-                break
+            except Exception as e:
+                resultados.append(ResultadoExecucao(False, f"Erro inesperado no bloco: {e}"))
 
         return resultados
 

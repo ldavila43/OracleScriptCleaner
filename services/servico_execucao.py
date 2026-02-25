@@ -11,6 +11,16 @@ class ServicoExecucao:
         self._log = log_fn
         self._progresso = progresso_fn
 
+    def _is_ignorable(self, mensagem: str) -> bool:
+        import re
+        from model.excecoes import ExecucaoError
+        match = re.search(r'ORA-(\d+)', mensagem)
+        if not match:
+            return False
+        codigo = f'ORA-{match.group(1)}'
+        temp = ExecucaoError("", codigo)
+        return temp.is_ignorable
+
     def executar_script_em_cliente(self, script: ScriptProcessado, cliente: str) -> ResultadoExecucao:
         try:
             with Banco(cliente) as banco:
@@ -20,18 +30,30 @@ class ServicoExecucao:
                     return ResultadoExecucao(False, "Falha na conexão")
 
                 resultados = banco.executar_scripts_batch(script.blocos)
+
+                sucessos = [r for r in resultados if r.sucesso]
                 erros = [r for r in resultados if not r.sucesso]
+                erros_criticos = [r for r in erros if not self._is_ignorable(r.mensagem)]
+                erros_ignoraveis = [r for r in erros if self._is_ignorable(r.mensagem)]
 
-                if not erros:
-                    self._log('success', f"{script.nome_arquivo} -> {cliente}: Executado ({len(resultados)} bloco(s))")
+                for i, r in enumerate(resultados):
+                    if not r.sucesso:
+                        if self._is_ignorable(r.mensagem):
+                            self._log('info', f"  └─ Bloco {i + 1} ignorado: {r.mensagem.splitlines()[0]}")
+                        else:
+                            self._log('error', f"  └─ Bloco {i + 1} falhou: {r.mensagem}")
+
+                if not erros_criticos:
+                    self._log('success',
+                              f"{script.nome_arquivo} -> {cliente}: Executado ({len(sucessos)} bloco(s) ok, {len(erros_ignoraveis)} ignorado(s))")
                     self.stats.scripts_executados += 1
-                else:
-                    for r in erros:
-                        self._log('error', f"{script.nome_arquivo} -> {cliente}: {r.mensagem}")
-                    self.stats.scripts_com_erro += 1
-                    self.stats.adicionar_erro(f"{script.nome_arquivo} -> {cliente}: {len(erros)} bloco(s) com erro")
+                    return resultados[-1]
 
-                return resultados[-1] if resultados else ResultadoExecucao(False, "Nenhum bloco executado")
+                msg_resumo = f"{len(erros_criticos)} erro(s) crítico(s) em {len(resultados)} bloco(s)"
+                self._log('warning', f"{script.nome_arquivo} -> {cliente}: Finalizado com {msg_resumo}")
+                self.stats.scripts_com_erro += 1
+                self.stats.adicionar_erro(f"{script.nome_arquivo} -> {cliente}: {msg_resumo}")
+                return erros_criticos[0]
 
         except ConfiguracaoError as e:
             self._log('error', f"{cliente}: Configuração incompleta — {e}")
