@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QCheckBox,
     QScrollArea, QFrame, QProgressBar, QTextEdit,
-    QSplitter, QMessageBox, QGridLayout, QRadioButton, QButtonGroup
+    QSplitter, QMessageBox, QGridLayout, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
@@ -208,18 +208,22 @@ class MainWindow(QMainWindow):
     def _card_opcoes_executar(self):
         card = self._card()
         layout = QHBoxLayout(card)
-        layout.setSpacing(24)
+        layout.setSpacing(12)
+        layout.setContentsMargins(8, 8, 8, 8)
 
         self._grupo_modo = QButtonGroup(self)
+        self._grupo_modo.setExclusive(True)
 
-        self.rb_atualizar = QRadioButton('Atualizar')
-        self.rb_executar_todos = QRadioButton('Executar todos')
-        self.rb_apenas_processar = QRadioButton('Apenas processar')
+        self.rb_atualizar = QPushButton('↑  Atualizar')
+        self.rb_executar_todos = QPushButton('▶▶  Executar todos')
+        self.rb_apenas_processar = QPushButton('⚙  Apenas processar')
+
+        for btn in (self.rb_atualizar, self.rb_executar_todos, self.rb_apenas_processar):
+            btn.setCheckable(True)
+            btn.setObjectName('btn_modo')
+            self._grupo_modo.addButton(btn)
+
         self.rb_atualizar.setChecked(True)
-
-        self._grupo_modo.addButton(self.rb_atualizar)
-        self._grupo_modo.addButton(self.rb_executar_todos)
-        self._grupo_modo.addButton(self.rb_apenas_processar)
 
         layout.addWidget(self.rb_atualizar)
         layout.addWidget(self.rb_executar_todos)

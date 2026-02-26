@@ -93,6 +93,30 @@ STYLE = """
         border: 1px solid #333333;
     }
 
+
+    QPushButton#btn_modo {
+        background-color: #252525;
+        border: 1px solid #3a3a3a;
+        border-radius: 4px;
+        padding: 8px 20px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #777777;
+        letter-spacing: 0.5px;
+    }
+
+    QPushButton#btn_modo:hover {
+        background-color: #2e2e2e;
+        border: 1px solid #555555;
+        color: #aaaaaa;
+    }
+
+    QPushButton#btn_modo:checked {
+        background-color: #1e3a4a;
+        border: 1px solid #2a6080;
+        color: #7ab8d4;
+    }
+
     QPushButton#btn_selecionar {
         background-color: #1e3a4a;
         border: 1px solid #2a5266;
