@@ -1,2 +1,2 @@
-from services.serviço_arquivo import ServicoArquivo
+from services.servico_arquivo import ServicoArquivo
 from services.servico_execucao import ServicoExecucao

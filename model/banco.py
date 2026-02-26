@@ -90,6 +90,13 @@ class Banco:
         except Exception:
             return []
 
+    def executar_funcao(self, nm_funcao):
+        if self.__cursor:
+            self.__cursor.execute(f"SELECT {nm_funcao} FROM DUAL")
+            resultado = self.__cursor.fetchone()
+            return resultado[0] if resultado else None
+        return None
+
     def executar_script(self, sql: str) -> ResultadoExecucao:
         if not self.__conexao or not self.__cursor:
             return ResultadoExecucao(False, "Conexão não estabelecida. Use o context manager (with).")
@@ -152,6 +159,17 @@ class Banco:
                 resultados.append(ResultadoExecucao(False, f"Erro inesperado no bloco: {e}"))
 
         return resultados
+
+    def atualizar_versao_banco(self, ultimo_script):
+        if self.__cursor:
+            self.__cursor.execute(f"""
+            create or replace FUNCTION busca_versao_banco RETURN VARCHAR2 IS
+            BEGIN
+                RETURN '{ultimo_script}';
+            END busca_versao_banco;
+            """)
+
+            self.__conexao.commit()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:

@@ -25,6 +25,13 @@ class ExecucaoError(SqlExecutorError):
             'ORA-02261',  # Unique/Primary key já existe na tabela
             'ORA-02275',  # Referential constraint já existe
             'ORA-02303',  # Não pode remover/substituir tipo com dependentes
+            'ORA-00001',  # Unique constraint violated
+            'ORA-00955',  # Name is already used by an existing object
+            'ORA-02260',  # PK/FK/Constraint already exists
+            'ORA-02275',  # PK/FK/Constraint already exists
+            'ORA-02264',  # PK/FK/Constraint already exists
+            'ORA-00957',  # Duplicate column name
+            'ORA-02443',  # Cannot drop constraint - nonexistent constraint
         }
         return self.codigo_ora in codigos_informativos
 

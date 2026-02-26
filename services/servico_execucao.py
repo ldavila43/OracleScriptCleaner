@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import List
 from model import Banco, ResultadoExecucao, ScriptProcessado, EstatisticasProcessamento
@@ -20,6 +21,22 @@ class ServicoExecucao:
         codigo = f'ORA-{match.group(1)}'
         temp = ExecucaoError("", codigo)
         return temp.is_ignorable
+
+    def _buscar_versao_cliente(self, cliente: str) -> str | None:
+        try:
+            with Banco(cliente) as banco:
+                return banco.executar_funcao('busca_versao_banco')
+        except Exception as e:
+            self._log('warning', f"{cliente}: Não foi possível obter versão do banco — executando todos os scripts. ({e})")
+            return None
+
+    def _atualizar_versao_cliente(self, cliente: str, nome_script: str):
+        try:
+            with Banco(cliente) as banco:
+                banco.atualizar_versao_banco(nome_script)
+            self._log('info', f"{cliente}: Versão atualizada para {nome_script}")
+        except Exception as e:
+            self._log('warning', f"{cliente}: Não foi possível atualizar versão no banco. ({e})")
 
     def executar_script_em_cliente(self, script: ScriptProcessado, cliente: str) -> ResultadoExecucao:
         try:
@@ -91,22 +108,62 @@ class ServicoExecucao:
             self.stats.adicionar_erro(f"{script.nome_arquivo} -> {cliente}: Exceção - {str(e)}")
             return ResultadoExecucao(False, f"Exceção: {str(e)}")
 
+    def _gravar_erros(self, diretorio: Path, clientes: List[str], erros: List[str]):
+        caminho = Path(__file__).parent.parent / 'erros.txt'
+        with caminho.open('w', encoding='utf-8') as f:
+            f.write(f"Clientes: {', '.join(clientes)}\n")
+            f.write(f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+            f.write(f"Diretório: {diretorio}\n")
+            f.write('=' * 60 + '\n\n')
+
+            if erros:
+                for erro in erros:
+                    f.write(f"{erro}\n")
+            else:
+                f.write("Nenhum erro crítico encontrado.\n")
+
     def processar_lote(self, diretorio: Path, clientes: List[str], scripts: List[ScriptProcessado]):
         self._log('info', f"Executando {len(scripts)} script(s) em {len(clientes)} cliente(s)")
 
-        total_operacoes = len(scripts) * len(clientes)
+        versoes = {}
+        for cliente in clientes:
+            versao = self._buscar_versao_cliente(cliente)
+            versoes[cliente] = versao
+            if versao:
+                self._log('info', f"{cliente}: Última versão no banco — {versao}")
+
+        total_operacoes = sum(
+            len([s for s in scripts if s.nome_arquivo > (versoes[c] or '')])
+            for c in clientes
+        )
         operacao_atual = 0
         resultados_execucao = {}
+        erros_criticos: List[str] = []
+        ultimo_script_por_cliente = {cliente: None for cliente in clientes}
 
         for script in scripts:
             resultados_script = {}
 
             for cliente in clientes:
+                if script.nome_arquivo <= (versoes.get(cliente) or ''):
+                    continue
+
                 operacao_atual += 1
                 self._progresso(operacao_atual, total_operacoes, f"{script.nome_arquivo} -> {cliente}")
                 resultado = self.executar_script_em_cliente(script, cliente)
                 resultados_script[cliente] = resultado
+                ultimo_script_por_cliente[cliente] = script.nome_arquivo
 
-            resultados_execucao[script.nome_arquivo] = resultados_script
+                if not resultado.sucesso and not self._is_ignorable(resultado.mensagem):
+                    erros_criticos.append(f"[{cliente}] {script.nome_arquivo}: {resultado.mensagem}")
+
+            if resultados_script:
+                resultados_execucao[script.nome_arquivo] = resultados_script
+
+        for cliente, ultimo_script in ultimo_script_por_cliente.items():
+            if ultimo_script:
+                self._atualizar_versao_cliente(cliente, ultimo_script)
+
+        self._gravar_erros(diretorio, clientes, erros_criticos)
 
         return resultados_execucao
