@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 from model import Banco, ResultadoExecucao, ScriptProcessado, EstatisticasProcessamento
 from model.excecoes import ConexaoError, ConfiguracaoError, ExecucaoError, SintaxeError, ObjetoError, PermissaoError
+from services.executor_sql import ExecutorSql
 
 
 class ServicoExecucao:
@@ -14,7 +15,6 @@ class ServicoExecucao:
 
     def _is_ignorable(self, mensagem: str) -> bool:
         import re
-        from model.excecoes import ExecucaoError
         match = re.search(r'ORA-(\d+)', mensagem)
         if not match:
             return False
@@ -25,7 +25,8 @@ class ServicoExecucao:
     def _buscar_versao_cliente(self, cliente: str) -> str | None:
         try:
             with Banco(cliente) as banco:
-                return banco.executar_funcao('busca_versao_banco')
+                executor = ExecutorSql(banco)
+                return executor.executar_funcao('busca_versao_banco')
         except Exception as e:
             self._log('warning', f"{cliente}: Não foi possível obter versão do banco — executando todos os scripts. ({e})")
             return None
@@ -33,7 +34,8 @@ class ServicoExecucao:
     def _atualizar_versao_cliente(self, cliente: str, nome_script: str):
         try:
             with Banco(cliente) as banco:
-                banco.atualizar_versao_banco(nome_script)
+                executor = ExecutorSql(banco)
+                executor.atualizar_versao_banco(nome_script)
             self._log('info', f"{cliente}: Versão atualizada para {nome_script}")
         except Exception as e:
             self._log('warning', f"{cliente}: Não foi possível atualizar versão no banco. ({e})")
@@ -46,7 +48,8 @@ class ServicoExecucao:
                     self.stats.scripts_com_erro += 1
                     return ResultadoExecucao(False, "Falha na conexão")
 
-                resultados = banco.executar_scripts_batch(script.blocos)
+                executor = ExecutorSql(banco)
+                resultados = executor.executar_lote(script.blocos)
 
                 sucessos = [r for r in resultados if r.sucesso]
                 erros = [r for r in resultados if not r.sucesso]
@@ -122,18 +125,19 @@ class ServicoExecucao:
             else:
                 f.write("Nenhum erro crítico encontrado.\n")
 
-    def processar_lote(self, diretorio: Path, clientes: List[str], scripts: List[ScriptProcessado]):
-        self._log('info', f"Executando {len(scripts)} script(s) em {len(clientes)} cliente(s)")
-
+    def _buscar_versoes(self, clientes: List[str], modo: str) -> dict:
         versoes = {}
-        for cliente in clientes:
-            versao = self._buscar_versao_cliente(cliente)
-            versoes[cliente] = versao
-            if versao:
-                self._log('info', f"{cliente}: Última versão no banco — {versao}")
+        if modo == 'atualizar':
+            for cliente in clientes:
+                versao = self._buscar_versao_cliente(cliente)
+                versoes[cliente] = versao
+                if versao:
+                    self._log('info', f"{cliente}: Última versão no banco — {versao}")
+        return versoes
 
+    def _executar_scripts(self, scripts: List[ScriptProcessado], clientes: List[str], versoes: dict):
         total_operacoes = sum(
-            len([s for s in scripts if s.nome_arquivo > (versoes[c] or '')])
+            len([s for s in scripts if s.nome_arquivo > (versoes.get(c) or '')])
             for c in clientes
         )
         operacao_atual = 0
@@ -160,10 +164,20 @@ class ServicoExecucao:
             if resultados_script:
                 resultados_execucao[script.nome_arquivo] = resultados_script
 
+        return resultados_execucao, erros_criticos, ultimo_script_por_cliente
+
+    def _finalizar_lote(self, diretorio: Path, clientes: List[str], erros: List[str], ultimo_script_por_cliente: dict):
         for cliente, ultimo_script in ultimo_script_por_cliente.items():
             if ultimo_script:
                 self._atualizar_versao_cliente(cliente, ultimo_script)
 
-        self._gravar_erros(diretorio, clientes, erros_criticos)
+        self._gravar_erros(diretorio, clientes, erros)
 
-        return resultados_execucao
+    def processar_lote(self, diretorio: Path, clientes: List[str], scripts: List[ScriptProcessado], modo: str = 'atualizar'):
+        self._log('info', f"Executando {len(scripts)} script(s) em {len(clientes)} cliente(s)")
+
+        versoes = self._buscar_versoes(clientes, modo)
+        resultados, erros, ultimos = self._executar_scripts(scripts, clientes, versoes)
+        self._finalizar_lote(diretorio, clientes, erros, ultimos)
+
+        return resultados

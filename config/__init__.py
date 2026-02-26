@@ -1,1 +1,2 @@
 from config.configuracao import Configuracao
+from config.oracle_conection_manager import OracleConnectionManager

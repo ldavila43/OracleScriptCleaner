@@ -6,3 +6,4 @@ venv/
 clientes.json
 __pycache__/
 .env
+erros.txt

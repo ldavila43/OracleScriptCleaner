@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QFileDialog, QCheckBox,
     QScrollArea, QFrame, QProgressBar, QTextEdit,
-    QSplitter, QMessageBox, QGridLayout
+    QSplitter, QMessageBox, QGridLayout, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
@@ -17,12 +17,12 @@ class Worker(QThread):
     sinal_progresso = pyqtSignal(int, int, str)
     sinal_finalizado = pyqtSignal(bool, str)
 
-    def __init__(self, controlador, diretorio, clientes, apenas_processar):
+    def __init__(self, controlador, diretorio, clientes, modo):
         super().__init__()
         self.controlador = controlador
         self.diretorio = diretorio
         self.clientes = clientes
-        self.apenas_processar = apenas_processar
+        self.modo = modo
 
     def run(self):
         self.controlador._tela.log = lambda tipo, msg: self.sinal_log.emit(tipo, msg)
@@ -32,7 +32,7 @@ class Worker(QThread):
             scripts, resultados = self.controlador.processar_lote(
                 diretorio=self.diretorio,
                 clientes=self.clientes,
-                executar=not self.apenas_processar
+                modo=self.modo
             )
             stats = self.controlador.obter_estatisticas()
             tem_erros = stats.tem_erros
@@ -136,7 +136,8 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.input_diretorio = QLineEdit()
         self.input_diretorio.setPlaceholderText('Nenhum diretório selecionado...')
-        self.input_diretorio.setReadOnly(True)
+        self.input_diretorio.setReadOnly(False)
+        self.input_diretorio.textChanged.connect(self._atualizar_contagem_manual)
 
         btn = QPushButton('Selecionar')
         btn.setObjectName('btn_selecionar')
@@ -207,10 +208,22 @@ class MainWindow(QMainWindow):
     def _card_opcoes_executar(self):
         card = self._card()
         layout = QHBoxLayout(card)
-        layout.setSpacing(16)
+        layout.setSpacing(24)
 
-        self.cb_apenas_processar = QCheckBox('Apenas processar (não executar nos bancos)')
-        layout.addWidget(self.cb_apenas_processar)
+        self._grupo_modo = QButtonGroup(self)
+
+        self.rb_atualizar = QRadioButton('Atualizar')
+        self.rb_executar_todos = QRadioButton('Executar todos')
+        self.rb_apenas_processar = QRadioButton('Apenas processar')
+        self.rb_atualizar.setChecked(True)
+
+        self._grupo_modo.addButton(self.rb_atualizar)
+        self._grupo_modo.addButton(self.rb_executar_todos)
+        self._grupo_modo.addButton(self.rb_apenas_processar)
+
+        layout.addWidget(self.rb_atualizar)
+        layout.addWidget(self.rb_executar_todos)
+        layout.addWidget(self.rb_apenas_processar)
         layout.addStretch()
 
         self.btn_executar = QPushButton('▶  EXECUTAR')
@@ -251,6 +264,13 @@ class MainWindow(QMainWindow):
 
         return card
 
+    def _obter_modo(self) -> str:
+        if self.rb_atualizar.isChecked():
+            return 'atualizar'
+        if self.rb_executar_todos.isChecked():
+            return 'executar_todos'
+        return 'apenas_processar'
+
     def _selecionar_diretorio(self):
         diretorio = QFileDialog.getExistingDirectory(self, 'Selecionar Diretório')
         if diretorio:
@@ -269,15 +289,21 @@ class MainWindow(QMainWindow):
     def _obter_clientes_selecionados(self):
         return [c for c, cb in self.interface.checkboxes.items() if cb.isChecked()]
 
+    def _atualizar_contagem_manual(self, texto):
+        caminho = Path(texto)
+        if caminho.is_dir():
+            arquivos = list(caminho.glob('*.sql'))
+            self.lbl_qtd_arquivos.setText(f'{len(arquivos)} arquivo(s) .sql encontrado(s)')
+        else:
+            self.lbl_qtd_arquivos.setText('Diretório inválido')
+
     def _executar(self):
         diretorio_str = self.input_diretorio.text()
         diretorio = Path(diretorio_str) if diretorio_str else None
         clientes = self._obter_clientes_selecionados()
-        apenas_processar = self.cb_apenas_processar.isChecked()
+        modo = self._obter_modo()
 
-        valido, mensagem = self.interface.controlador.validar_execucao(
-            diretorio, clientes, apenas_processar
-        )
+        valido, mensagem = self.interface.controlador.validar_execucao(diretorio, clientes, modo)
         if not valido:
             QMessageBox.warning(self, 'Aviso', mensagem)
             return
@@ -286,9 +312,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Aviso', 'Já existe um processamento em andamento.')
             return
 
-        msg = self.interface.controlador.montar_mensagem_confirmacao(
-            diretorio, clientes, apenas_processar
-        )
+        msg = self.interface.controlador.montar_mensagem_confirmacao(diretorio, clientes, modo)
         if QMessageBox.question(self, 'Confirmar Execução', msg) != QMessageBox.StandardButton.Yes:
             return
 
@@ -298,7 +322,7 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText('Processando...')
 
         self.interface.worker = Worker(
-            self.interface.controlador, diretorio, clientes, apenas_processar
+            self.interface.controlador, diretorio, clientes, modo
         )
         self.interface.worker.sinal_log.connect(self.adicionar_log)
         self.interface.worker.sinal_progresso.connect(self.atualizar_progresso_ui)

@@ -9,10 +9,13 @@ Ferramenta desktop para execução em lote de scripts SQL/PL-SQL em bancos de da
 - Execução de scripts `.sql` em múltiplos bancos Oracle simultaneamente
 - Sanitização automática de encoding (UTF-8, ISO-8859-1, Windows-1252, double-encoding)
 - Suporte completo a blocos PL/SQL, DDL e DML com separação correta por `/`
+- Parser SQL robusto: respeita strings, q-quotes e filtra comandos SQL*Plus
+- Controle de versão por cliente via função `busca_versao_banco` no banco
+- Três modos de execução: Atualizar, Executar todos e Apenas processar
+- Geração automática de `erros.txt` na raiz do projeto ao final de cada execução
 - Tratamento de exceções Oracle tipadas (sintaxe, objeto não encontrado, permissão)
 - Log de execução em tempo real com cores por tipo de mensagem
 - Interface gráfica com painel de log redimensionável
-- Modo "apenas processar" para validar scripts sem executar no banco
 
 ---
 
@@ -24,10 +27,12 @@ projetos/
 ├── requirements.txt
 ├── clientes.json               # Lista de clientes disponíveis
 ├── .env                        # Credenciais dos bancos (não versionar)
+├── erros.txt                   # Gerado automaticamente após cada execução
 │
 ├── config/
 │   ├── __init__.py
-│   └── configuracao.py         # Leitura do .env e clientes.json
+│   ├── configuracao.py         # Leitura do .env e clientes.json
+│   └── oracle_connection_manager.py  # Inicialização do driver e criação de conexões
 │
 ├── controller/
 │   ├── __init__.py
@@ -35,15 +40,18 @@ projetos/
 │
 ├── model/
 │   ├── __init__.py
-│   ├── banco.py                # Conexão e execução Oracle
+│   ├── banco.py                # Wrapper de baixo nível: conexão, cursor, commit
 │   ├── data_classes.py         # Dataclasses do domínio
 │   ├── encoder.py              # Sanitização de encoding
 │   └── excecoes.py             # Hierarquia de exceções do sistema
 │
 ├── services/
 │   ├── __init__.py
-│   ├── servico_arquivo.py      # Listagem, limpeza e validação de scripts
-│   └── servico_execucao.py     # Execução dos scripts no banco
+│   ├── executor_sql.py         # Execução de blocos e lotes SQL
+│   ├── inspetor_oracle.py      # Extração de objetos e verificação de erros de compilação
+│   ├── parser_sql.py           # Parsing e limpeza de scripts SQL
+│   ├── servico_arquivo.py      # Listagem, validação e processamento de arquivos
+│   └── servico_execucao.py     # Orquestração da execução por cliente e modo
 │
 └── view/
     ├── __init__.py
@@ -59,6 +67,7 @@ projetos/
 - Python 3.11+
 - Oracle Instant Client instalado e configurado no PATH
 - Acesso de rede aos bancos Oracle configurados
+- Função `busca_versao_banco` presente em todos os bancos (ver seção Controle de Versão)
 
 ---
 
@@ -123,8 +132,38 @@ python main.py
 
 1. Selecione o diretório contendo os arquivos `.sql`
 2. Selecione os clientes onde os scripts serão executados
-3. Opcional: marque **"Apenas processar"** para sanitizar os arquivos sem executar no banco
-4. Clique em **Executar** e acompanhe o log em tempo real
+3. Escolha o modo de execução e clique em **Executar**
+4. Acompanhe o log em tempo real e consulte o `erros.txt` ao final
+
+---
+
+## Modos de Execução
+
+| Modo | Comportamento |
+|------|--------------|
+| **Atualizar** | Busca a versão atual de cada cliente via `busca_versao_banco` e executa apenas os scripts posteriores. Atualiza a função ao final. |
+| **Executar todos** | Ignora a versão do banco e executa todos os scripts do diretório. Atualiza a função ao final. |
+| **Apenas processar** | Sanitiza e valida os arquivos sem executar nada no banco. |
+
+---
+
+## Controle de Versão
+
+O sistema utiliza a função `busca_versao_banco` presente em cada banco para determinar o último script executado. O nome retornado deve corresponder ao nome do arquivo `.sql` (ex: `07512_constantes.sql`).
+
+Como os scripts são nomeados com prefixo numérico sequencial, a comparação é feita por ordem alfabética — scripts com nome maior que o retornado pela função são considerados pendentes.
+
+A função é atualizada automaticamente ao final de cada execução com o nome do último script tentado, independente de sucesso ou falha.
+
+Exemplo de função esperada no banco:
+```sql
+CREATE OR REPLACE FUNCTION busca_versao_banco RETURN VARCHAR2 IS
+BEGIN
+    RETURN '07512_constantes.sql';
+END busca_versao_banco;
+```
+
+> Se a função não existir ou não puder ser consultada, o sistema exibe um aviso e executa todos os scripts do diretório.
 
 ---
 
@@ -175,10 +214,11 @@ SqlExecutorError
 
 ## Arquitetura
 
-O projeto segue o padrão **MVC** com separação em camadas:
+O projeto segue o padrão **MVC** com separação em camadas e princípios SOLID:
 
-- **Model** — estruturas de dados, conexão com banco, encoding e exceções
-- **Services** — regras de negócio (processamento de arquivos e execução)
+- **Config** — infraestrutura de conexão e leitura de configurações
+- **Model** — estruturas de dados, wrapper de banco, encoding e exceções
+- **Services** — regras de negócio divididas por responsabilidade única
 - **Controller** — orquestra os serviços e faz a ponte com a view
 - **View** — interface gráfica PyQt6, desacoplada via `ViewInterface`
 

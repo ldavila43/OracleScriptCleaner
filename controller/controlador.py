@@ -27,27 +27,32 @@ class Controlador:
     def carregar_clientes(self) -> List[str]:
         return Configuracao.carregar_clientes()
 
-    def validar_execucao(self, diretorio, clientes, apenas_processar) -> tuple[bool, str]:
+    def validar_execucao(self, diretorio, clientes, modo) -> tuple[bool, str]:
         if not diretorio:
             return False, 'Selecione um diretório de scripts primeiro.'
 
-        if not apenas_processar and not clientes:
-            return False, 'Selecione ao menos um cliente ou apenas processe.'
+        if modo != 'apenas_processar' and not clientes:
+            return False, 'Selecione ao menos um cliente ou escolha "Apenas processar".'
 
         return True, ''
 
-    def montar_mensagem_confirmacao(self, diretorio, clientes, apenas_processar) -> str:
-        msg = f'Executar scripts em:\n\nDiretório: {diretorio}\n'
+    def montar_mensagem_confirmacao(self, diretorio, clientes, modo) -> str:
+        labels = {
+            'atualizar':        'Atualizar (executar scripts posteriores à versão do banco)',
+            'executar_todos':   'Executar todos (ignorar versão do banco)',
+            'apenas_processar': 'Apenas processar (não executar nos bancos)',
+        }
 
-        if apenas_processar:
-            msg += '\nModo: Apenas processar (não executar)\n'
-        else:
+        msg = f'Executar scripts em:\n\nDiretório: {diretorio}\n'
+        msg += f'Modo: {labels.get(modo, modo)}\n'
+
+        if modo != 'apenas_processar':
             msg += f'Clientes: {", ".join(clientes)}\n'
 
         msg += '\nDeseja continuar?'
         return msg
 
-    def processar_lote(self, diretorio: Path, clientes: List[str], executar: bool = True):
+    def processar_lote(self, diretorio: Path, clientes: List[str], modo: str = 'atualizar'):
         self.stats = EstatisticasProcessamento()
         self.stats.iniciar()
 
@@ -77,9 +82,9 @@ class Controlador:
 
         resultados_execucao = {}
 
-        if executar and clientes and scripts:
+        if modo != 'apenas_processar' and clientes and scripts:
             servico_execucao = ServicoExecucao(self.stats, self._log, self._progresso)
-            resultados_execucao = servico_execucao.processar_lote(diretorio, clientes, scripts)
+            resultados_execucao = servico_execucao.processar_lote(diretorio, clientes, scripts, modo)
 
         self.stats.finalizar()
         self._log('info', f"Processamento concluído em {self.stats.tempo_decorrido:.2f}s")
