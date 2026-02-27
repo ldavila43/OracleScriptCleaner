@@ -4,14 +4,18 @@ from config.oracle_conection_manager import OracleConnectionManager
 
 
 class Banco:
-    def __init__(self, cliente: str):
+    def __init__(self, cliente: str = None, credenciais: dict = None):
         OracleConnectionManager.inicializar_driver()
         self.cliente_nome = cliente
+        self._credenciais = credenciais
         self.conexao: Optional[oracledb.Connection] = None
         self.cursor: Optional[oracledb.Cursor] = None
 
     def __enter__(self):
-        self.conexao = OracleConnectionManager.criar_conexao(self.cliente_nome)
+        self.conexao = OracleConnectionManager.criar_conexao(
+            cliente=self.cliente_nome,
+            credenciais=self._credenciais
+        )
         self.cursor = self.conexao.cursor()
         return self
 

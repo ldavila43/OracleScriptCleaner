@@ -8,10 +8,11 @@ from services.executor_sql import ExecutorSql
 
 class ServicoExecucao:
 
-    def __init__(self, stats: EstatisticasProcessamento, log_fn, progresso_fn):
+    def __init__(self, stats: EstatisticasProcessamento, log_fn, progresso_fn, credenciais: dict = None):
         self.stats = stats
         self._log = log_fn
         self._progresso = progresso_fn
+        self._credenciais = credenciais
 
     def _is_ignorable(self, mensagem: str) -> bool:
         import re
@@ -24,7 +25,7 @@ class ServicoExecucao:
 
     def _buscar_versao_cliente(self, cliente: str) -> str | None:
         try:
-            with Banco(cliente) as banco:
+            with Banco(cliente, credenciais=self._credenciais) as banco:
                 executor = ExecutorSql(banco)
                 return executor.executar_funcao('busca_versao_banco')
         except Exception as e:
@@ -33,7 +34,7 @@ class ServicoExecucao:
 
     def _atualizar_versao_cliente(self, cliente: str, nome_script: str):
         try:
-            with Banco(cliente) as banco:
+            with Banco(cliente, credenciais=self._credenciais) as banco:
                 executor = ExecutorSql(banco)
                 executor.atualizar_versao_banco(nome_script)
             self._log('info', f"{cliente}: Versão atualizada para {nome_script}")
@@ -42,7 +43,7 @@ class ServicoExecucao:
 
     def executar_script_em_cliente(self, script: ScriptProcessado, cliente: str) -> ResultadoExecucao:
         try:
-            with Banco(cliente) as banco:
+            with Banco(cliente, credenciais=self._credenciais) as banco:
                 if not banco.esta_conectado:
                     self._log('error', f"{script.nome_arquivo} -> {cliente}: Falha na conexão")
                     self.stats.scripts_com_erro += 1
@@ -111,8 +112,8 @@ class ServicoExecucao:
             self.stats.adicionar_erro(f"{script.nome_arquivo} -> {cliente}: Exceção - {str(e)}")
             return ResultadoExecucao(False, f"Exceção: {str(e)}")
 
-    def _gravar_erros(self, diretorio: Path, clientes: List[str], erros: List[str]):
-        caminho = Path(__file__).parent.parent / 'erros.txt'
+    def _gravar_erros(self, diretorio: Path, clientes: List[str], erros: List[str], log_erros: Path = None):
+        caminho = log_erros if log_erros else Path(__file__).parent.parent / 'erros.txt'
         with caminho.open('w', encoding='utf-8') as f:
             f.write(f"Clientes: {', '.join(clientes)}\n")
             f.write(f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
@@ -166,18 +167,18 @@ class ServicoExecucao:
 
         return resultados_execucao, erros_criticos, ultimo_script_por_cliente
 
-    def _finalizar_lote(self, diretorio: Path, clientes: List[str], erros: List[str], ultimo_script_por_cliente: dict):
+    def _finalizar_lote(self, diretorio: Path, clientes: List[str], erros: List[str], ultimo_script_por_cliente: dict, log_erros: Path = None):
         for cliente, ultimo_script in ultimo_script_por_cliente.items():
             if ultimo_script:
                 self._atualizar_versao_cliente(cliente, ultimo_script)
 
-        self._gravar_erros(diretorio, clientes, erros)
+        self._gravar_erros(diretorio, clientes, erros, log_erros=log_erros)
 
-    def processar_lote(self, diretorio: Path, clientes: List[str], scripts: List[ScriptProcessado], modo: str = 'atualizar'):
+    def processar_lote(self, diretorio: Path, clientes: List[str], scripts: List[ScriptProcessado], modo: str = 'atualizar', log_erros: Path = None):
         self._log('info', f"Executando {len(scripts)} script(s) em {len(clientes)} cliente(s)")
 
         versoes = self._buscar_versoes(clientes, modo)
         resultados, erros, ultimos = self._executar_scripts(scripts, clientes, versoes)
-        self._finalizar_lote(diretorio, clientes, erros, ultimos)
+        self._finalizar_lote(diretorio, clientes, erros, ultimos, log_erros=log_erros)
 
         return resultados

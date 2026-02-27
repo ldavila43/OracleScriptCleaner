@@ -16,21 +16,24 @@ class OracleConnectionManager:
                 raise RuntimeError(f"Falha ao carregar Oracle Instant Client: {e}")
 
     @staticmethod
-    def criar_conexao(cliente: str) -> oracledb.Connection:
-        cfg = Configuracao.obter_configuracao_banco(cliente)
+    def criar_conexao(cliente: str = None, credenciais: dict = None) -> oracledb.Connection:
+        if credenciais:
+            cfg = credenciais
+        else:
+            cfg = Configuracao.obter_configuracao_banco(cliente)
 
         if not all([cfg.get('host'), cfg.get('user'), cfg.get('password'), cfg.get('service')]):
             from model.excecoes import ConfiguracaoError
             campos_faltando = [k for k in ('host', 'user', 'password', 'service') if not cfg.get(k)]
             raise ConfiguracaoError(
-                f"Configurações incompletas para {cliente}. Faltando: {', '.join(campos_faltando)}"
+                f"Configurações incompletas. Faltando: {', '.join(campos_faltando)}"
             )
 
         try:
             return oracledb.connect(
                 user=cfg['user'],
                 password=cfg['password'],
-                dsn=f"{cfg['host']}:{cfg['port']}/{cfg['service']}"
+                dsn=f"{cfg['host']}:{cfg.get('port', '1521')}/{cfg['service']}"
             )
         except oracledb.Error as e:
-            raise ConexaoError(f"Erro ao conectar em {cliente}: {e}") from e
+            raise ConexaoError(f"Erro ao conectar: {e}") from e

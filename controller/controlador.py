@@ -16,6 +16,38 @@ class Controlador:
         self._tela = InterfaceGrafica(self)
         self._tela.executar()
 
+    def iniciar_cli(self, diretorio: Path, credenciais: dict, modo: str, log_erros: Path = None):
+        import sys
+
+        def log(tipo, mensagem):
+            prefixos = {'info': 'ℹ', 'success': '✓', 'warning': '⚠', 'error': '✗'}
+            print(f"{prefixos.get(tipo, '•')}  {mensagem}", flush=True)
+
+        def progresso(atual, total, mensagem):
+            print(f"[{atual}/{total}] {mensagem}", flush=True)
+
+        self._log = log
+        self._progresso = progresso
+
+        log('info', f"Modo CLI — diretório: {diretorio}")
+        log('info', f"Host: {credenciais['host']} | Serviço: {credenciais['service']} | Usuário: {credenciais['user']}")
+
+        scripts, _ = self.processar_lote(
+            diretorio=diretorio,
+            clientes=['CLI'],
+            modo=modo,
+            credenciais=credenciais,
+            log_erros=log_erros
+        )
+
+        stats = self.obter_estatisticas()
+        if stats.tem_erros:
+            log('warning', f"Concluído com {len(stats.erros)} erro(s). Consulte erros.txt.")
+            sys.exit(1)
+        else:
+            log('success', "Concluído com sucesso!")
+            sys.exit(0)
+
     def _log(self, tipo, mensagem):
         if self._tela:
             self._tela.log(tipo, mensagem)
@@ -52,7 +84,7 @@ class Controlador:
         msg += '\nDeseja continuar?'
         return msg
 
-    def processar_lote(self, diretorio: Path, clientes: List[str], modo: str = 'atualizar'):
+    def processar_lote(self, diretorio: Path, clientes: List[str], modo: str = 'atualizar', credenciais: dict = None, log_erros: Path = None):
         self.stats = EstatisticasProcessamento()
         self.stats.iniciar()
 
@@ -83,8 +115,8 @@ class Controlador:
         resultados_execucao = {}
 
         if modo != 'apenas_processar' and clientes and scripts:
-            servico_execucao = ServicoExecucao(self.stats, self._log, self._progresso)
-            resultados_execucao = servico_execucao.processar_lote(diretorio, clientes, scripts, modo)
+            servico_execucao = ServicoExecucao(self.stats, self._log, self._progresso, credenciais=credenciais)
+            resultados_execucao = servico_execucao.processar_lote(diretorio, clientes, scripts, modo, log_erros=log_erros)
 
         self.stats.finalizar()
         self._log('info', f"Processamento concluído em {self.stats.tempo_decorrido:.2f}s")
